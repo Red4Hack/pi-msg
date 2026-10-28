@@ -2,7 +2,7 @@
 
 Multi-agent messenger + crew orchestration for [pi](https://github.com/earendil-works/pi). In-process, zero config, no external CLI.
 
-Install: `pi install /path/to/pi-msg` (or `pi -e ./src/index.ts`).
+Install: `pi install https://github.com/Red4Hack/pi-msg` (or `pi install git:github.com/Red4Hack/pi-msg`). Local: `pi install /path/to/pi-msg` or `pi -e ./src/index.ts`.
 
 ## Use
 - `/msg` opens the panel (agents, tasks, feed, chat). `Enter` detail, `m` chat (`@Name msg`, `@all msg`), `q` stop task, `A` abort all.
@@ -68,3 +68,6 @@ sequenceDiagram
   A->>X: complete, release reservations
   S->>L: report
 ```
+
+## License
+MIT, see [LICENSE](LICENSE).
