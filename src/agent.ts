@@ -18,8 +18,14 @@ export async function availableModels(): Promise<string[]> {
 /** "provider/id[:level]" → { model, thinkingLevel }. The error lists the valid ones. */
 export async function resolveModel(spec?: string): Promise<{ model?: any; thinkingLevel?: string }> {
 	if (!spec) return {};
-	const [ref, level] = spec.split(/:(?=[a-z]+$)/);
-	const model = (await listModels()).find((m: any) => `${m.provider}/${m.id}` === ref || m.id === ref);
+	// ":level" only counts when it is a real thinking level (ids like "x:latest" or "Q4_K_M" keep their colon)
+	const lv = spec.match(/^(.*):(off|minimal|low|medium|high|xhigh|max)$/);
+	const [ref, level] = lv ? [lv[1], lv[2]] : [spec, undefined];
+	const all = await listModels();
+	const q = ref.toLowerCase();
+	const model = all.find((m: any) => `${m.provider}/${m.id}` === ref || m.id === ref)
+		?? all.find((m: any) => `${m.provider}/${m.id}`.toLowerCase() === q || m.id.toLowerCase() === q)
+		?? all.find((m: any) => `${m.provider}/${m.id}`.toLowerCase().endsWith(q)); // partial: "sonnet-5-5", "claude-code/sonnet"
 	if (!model) throw new Error(`model "${spec}" unavailable. Valid: ${(await availableModels()).join(", ")}`);
 	return { model, thinkingLevel: level };
 }

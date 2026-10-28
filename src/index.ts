@@ -42,6 +42,7 @@ const Params = Type.Object({
 	autoApprove: Type.Optional(Type.Boolean({ description: "plan: skips plan approval" })),
 	to: Type.Optional(Type.String()),
 	message: Type.Optional(Type.String()),
+	wait: Type.Optional(Type.Boolean({ description: "task|tasks|plan|resume run in background by default; true blocks until done" })),
 	paths: Type.Optional(Type.Array(Type.String())),
 	reason: Type.Optional(Type.String()),
 	name: Type.Optional(Type.String()),
@@ -292,6 +293,12 @@ export default function (pi: ExtensionAPI) {
 			"Multi-agent, in-process. Delegate: {action:'task',task} = 1 worker (research/grep/docs); {action:'tasks',tasks:[{id,prompt,deps,files}]} = parallel graph (waves); {action:'plan',goal} = planner generates the graph. Coordination: list, feed, send, broadcast, reserve, release. Swarm: swarm, claim, unclaim, complete. Team: team, team.*, approve, reject. Models: action=models lists them; `model` optional (provider/id[:level]), omitted = current session. Tasks that write require `files`.",
 		parameters: Params,
 		async execute(_id: string, params: any, signal: AbortSignal, _upd: unknown, ctx: any) {
+			// Delegation actions return at once (like pi-messenger); the result arrives later as a message.
+			if (["task", "tasks", "plan", "resume"].includes(params.action) && !params.wait) {
+				const done = (t: string) => pi.sendMessage({ customType: "msg", content: `[msg ${params.action} finished]\n${t}`, display: true }, { triggerTurn: true, deliverAs: "followUp" });
+				void act(params, undefined, ctx).then(done, (e) => done(`error: ${e?.message ?? e}`));
+				return { content: [{ type: "text", text: `Started ${params.action} in background. The result arrives as a [msg ... finished] message; action=status shows progress.` }], details: undefined };
+			}
 			const text = await act(params, signal, ctx);
 			return { content: [{ type: "text", text }], details: undefined };
 		},
