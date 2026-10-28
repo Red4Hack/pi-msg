@@ -14,7 +14,7 @@ export function makeGuard(bus: Bus, name: string, now: () => number = Date.now) 
 	const touch = (extra: Record<string, unknown> = {}) =>
 		bus.update(name, (a) => {
 			const recent = edits.filter((t) => now() - t < STUCK_MS).length;
-			return { tools: a.tools + 1, lastActivity: now(), status: "active", note: failing ? "debugging…" : recent >= 8 ? "on fire" : "", ...extra };
+			return { tools: a.tools + 1, lastActivity: now(), status: "active", note: failing ? "debugging…" : recent >= 8 ? "on fire" : a.note === "debugging…" || a.note === "on fire" ? "" : a.note ?? "", ...extra };
 		});
 	const block = (b: { owner: string; reason?: string; path: string }) => ({
 		block: true as const,

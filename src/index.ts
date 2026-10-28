@@ -273,7 +273,14 @@ export default function (pi: ExtensionAPI) {
 				return `Claim ${t.id}:\n${t.prompt}`;
 			}
 			case "unclaim": b.unclaim(me, p.taskId); b.release(me); b.update(me, { task: undefined }); return "ok";
-			case "complete": b.complete(me, p.taskId, p.message); b.update(me, { task: undefined }); return "ok";
+			case "complete": {
+				b.complete(me, p.taskId, p.message);
+				b.update(me, { task: undefined });
+				// keep the run in sync so status/resume see swarm completions
+				const r = b.findRun(p.taskId), t = r?.tasks.find((x) => x.id === p.taskId);
+				if (r && t) { t.status = "done"; if (p.message) t.result = p.message; b.saveRun(r); }
+				return "ok";
+			}
 			case "team": return team.activate(cwd, p.profile ?? "review-squad");
 			case "team.save": return team.save(cwd);
 			case "team.charter": if (p.message) { team.updateCharter(cwd, p.message); } return team.charter(cwd);
@@ -294,7 +301,7 @@ export default function (pi: ExtensionAPI) {
 		parameters: Params,
 		async execute(_id: string, params: any, signal: AbortSignal, _upd: unknown, ctx: any) {
 			// Delegation actions return at once (like pi-messenger); the result arrives later as a message.
-			if (["task", "tasks", "plan", "resume"].includes(params.action) && !params.wait) {
+			if (["task", "tasks", "plan", "resume"].includes(params.action) && !params.wait && ctx?.hasUI) { // no UI (pi -p) would exit before the background run ends
 				const done = (t: string) => pi.sendMessage({ customType: "msg", content: `[msg ${params.action} finished]\n${t}`, display: true }, { triggerTurn: true, deliverAs: "followUp" });
 				void act(params, undefined, ctx).then(done, (e) => done(`error: ${e?.message ?? e}`));
 				return { content: [{ type: "text", text: `Started ${params.action} in background. The result arrives as a [msg ... finished] message; action=status shows progress.` }], details: undefined };

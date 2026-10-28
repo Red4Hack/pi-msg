@@ -80,8 +80,22 @@ export async function runAgent(o: AgentOpts): Promise<string> {
 	const poll = o.bus && o.name ? setInterval(() => {
 			for (const m of o.bus!.drain(o.name!)) void session.steer(`[msg from ${m.from}] ${m.text}`);
 		}, 1000) : undefined;
+	let lastNote = "";
 	const unsub = session.subscribe((ev: any) => {
-		if ((ev.type === "tool_execution_end" || ev.type === "turn_end") && o.bus && o.name) o.bus.update(o.name, { tokens: session.getSessionStats().tokens.total });
+		if (!o.bus || !o.name) return;
+		const bus = o.bus, name = o.name;
+		// live state for the TUI: only write when it changes (message_update fires per token)
+		const setNote = (note: string) => {
+			if (note === lastNote) return;
+			lastNote = note;
+			bus.update(name, { note, lastActivity: Date.now() });
+		};
+		if (ev.type === "message_update") {
+			const t = ev.assistantMessageEvent?.type;
+			if (t === "thinking_delta") setNote("thinking…");
+			else if (t === "text_delta") setNote("writing…");
+		} else if (ev.type === "tool_execution_start") setNote(String(ev.toolName));
+		if (ev.type === "tool_execution_end" || ev.type === "turn_end" || ev.type === "message_end") bus.update(name, { tokens: session.getSessionStats().tokens.total });
 	});
 	try {
 		if (o.signal?.aborted) throw new Error("aborted");

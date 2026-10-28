@@ -220,7 +220,7 @@ class Panel {
 			const ev = this.d.bus.recent(200).filter((e) => e.who === wk.name);
 			const start = ev[0]?.ts ?? wk.startedAt;
 			for (const e of ev.slice(-20)) L.push(`  [${clock(e.ts - start)}] ${e.kind} ${e.text}`);
-			L.push("  → thinking...");
+			L.push(`  → ${wk.note || "working"}`);
 		} else {
 			if (t.deps.length) {
 				L.push("Dependencies:");
@@ -265,8 +265,9 @@ class Panel {
 			if (t.approval === "pending") h.push("y/n:Approve");
 			if (this.mode === "detail") h.push("←→:Nav");
 		}
-		h.push("l/L:Lobby", "m:Chat", "f:Feed", "A:AbortAll", "Esc:Close");
-		return th.fg("dim", h.join("  ") + HINTS);
+		h.push("l/L:Lobby", "m:Chat", "f:Feed", "A:AbortAll", ...HINTS.trim().split(" "));
+		// single line (keeps the content area tall); Esc:Close first so right-edge truncation never hides it
+		return th.fg("dim", h.join(" "));
 	}
 
 	render(): string[] {
@@ -288,7 +289,7 @@ class Panel {
 		const agents = this.d.bus.agents();
 		const now = Date.now();
 
-		const title = `${th.fg("accent", "Messenger")} ─ ${dim(this.d.cwd.split("/").pop() ?? "")}`;
+		const title = `${th.fg("accent", "Messenger")} ─ ${dim(this.d.cwd.split("/").pop() ?? "")} ─ ${dim("Esc:Close")}`;
 		const bl = Math.max(0, innerW - visibleWidth(title) - 2);
 		const lines = [border(`╭${"─".repeat(Math.floor(bl / 2))}`) + ` ${title} ` + border(`${"─".repeat(bl - Math.floor(bl / 2))}╮`)];
 

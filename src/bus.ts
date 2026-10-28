@@ -54,6 +54,7 @@ const ADJ = ["Swift", "Lunar", "Oak", "Iron", "Bold", "Quiet", "Amber", "Crimson
 const NOUN = ["Raven", "Dust", "Tree", "Fox", "Hawk", "Falcon", "Otter", "Comet", "River", "Stone", "Wolf", "Lynx", "Heron", "Maple", "Ember", "Pine", "Tiger", "Moth", "Reef", "Finch"];
 const sleepSync = (ms: number) => Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
 const enc = encodeURIComponent;
+let seq = 0; // keeps same-millisecond messages in send order
 
 export function createBus(cwd: string) {
 	const root = path.join(cwd, ".pi", "msg");
@@ -149,7 +150,7 @@ export function createBus(cwd: string) {
 		const names = to === "all" ? agents().filter((a) => a.name !== from && (sender?.human || !a.human)).map((a) => a.name) : [to];
 		if (to !== "all" && !agents().some((a) => a.name === to)) throw new Error(`agent "${to}" not found`);
 		for (const n of names) {
-			writeJson(p("inbox", n, `${Date.now()}-${crypto.randomUUID()}.json`), { from, to, text, ts: Date.now() });
+			writeJson(p("inbox", n, `${String(Date.now()).padStart(15, "0")}-${String(seq++).padStart(8, "0")}-${crypto.randomUUID()}.json`), { from, to, text, ts: Date.now() });
 		}
 		feed({ who: from, kind: "message", text: `→ ${to}: ${text}` });
 		return names.length;
@@ -210,7 +211,7 @@ export function createBus(cwd: string) {
 	}
 	function recent(n = 20): { ts: number; who: string; kind: string; text: string }[] {
 		try {
-			return fs.readFileSync(p("feed.jsonl"), "utf8").trim().split("\n").filter(Boolean).slice(-n).map((l) => JSON.parse(l));
+			return fs.readFileSync(p("feed.jsonl"), "utf8").trim().split("\n").filter(Boolean).map((l) => JSON.parse(l)).slice(n > 0 ? -n : n === 0 ? Infinity : 0);
 		} catch {
 			return [];
 		}
@@ -219,6 +220,14 @@ export function createBus(cwd: string) {
 	// ---- runs
 	const saveRun = (r: Run) => writeJson(p("runs", `${r.id}.json`), r);
 	const loadRun = (id: string) => readJson<Run | null>(p("runs", `${id}.json`), null);
+	/** Newest run that contains the task (a newer unrelated run must not be touched). */
+	const findRun = (taskId: string) => {
+		for (const f of files(p("runs")).reverse()) {
+			const r = loadRun(f.slice(0, -5));
+			if (r?.tasks.some((t) => t.id === taskId)) return r;
+		}
+		return null;
+	};
 	const latestRun = () => {
 		const f = files(p("runs")).pop();
 		return f ? loadRun(f.slice(0, -5)) : null;
@@ -266,5 +275,5 @@ export function createBus(cwd: string) {
 	};
 	const completed = () => new Set(files(p("completions")).map((f) => decodeURIComponent(f.slice(0, -5))));
 
-	return { root, agents, join, update, leave, send, drain, reserve, release, blocker, blockerInText, reservedBy, reservations, feed, recent, saveRun, loadRun, latestRun, claims, claim, unclaim, complete, completed, reopen };
+	return { root, agents, join, update, leave, send, drain, reserve, release, blocker, blockerInText, reservedBy, reservations, feed, recent, saveRun, loadRun, latestRun, findRun, claims, claim, unclaim, complete, completed, reopen };
 }
