@@ -1,0 +1,21 @@
+{
+  "name": "pi-msg",
+  "version": "0.1.0",
+  "type": "module",
+  "description": "Multi-agent messenger + crew orchestration for pi, in-process, zero config",
+  "keywords": [
+    "pi-package"
+  ],
+  "pi": {
+    "extensions": [
+      "./src/index.ts"
+    ]
+  },
+  "license": "MIT",
+  "peerDependencies": {
+    "@earendil-works/pi-coding-agent": "*",
+    "@earendil-works/pi-ai": "*",
+    "@earendil-works/pi-tui": "*",
+    "typebox": "*"
+  }
+}
