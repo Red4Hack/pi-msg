@@ -7,7 +7,7 @@ import { createBus } from "../src/bus.ts";
 
 test("2 workers share 3 tasks via claim", async () => {
 	const cwd = fs.mkdtempSync(path.join(os.tmpdir(), "msg-swarm-"));
-	const bus = createBus(cwd);
+	const bus = createBus(cwd, path.join(cwd, ".pi/msg"));
 	const tasks = ["t1", "t2", "t3"];
 	const ran: Record<string, string[]> = {};
 	const worker = async () => {

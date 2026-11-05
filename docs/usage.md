@@ -39,7 +39,7 @@ Models default to the current session's model. The LLM can override per call; `m
 - `✉ N unread (/msg)` appears in the status bar until you open the panel.
 
 ## Optional config
-`{"announce": true}` in `.pi/msg/config.json` (project) or `~/.pi/agent/msg.json` (global) posts the full result in chat when a `/msg` run finishes. Default: a one-line notification.
+`{"announce": true}` in `~/.pi/agent/msg.json` posts the full result in chat when a `/msg` run finishes. Default: a one-line notification.
 
 ## Team layer (optional)
 Ask in plain language ("use the review squad", "migration, pause before database changes"). The LLM calls `msg({action:"team", profile})`. Built-in profiles: `migration-squad` (approval gates on `database`, `migration`, `destructive`, `api-contract`), `review-squad`, `research-squad`. Tasks with matching `riskLabels` wait for approval (`y`/`n` in the panel, or `approve`/`reject` actions). `team.save` writes an editable copy to `~/.pi/agent/msg/team-profiles/`.

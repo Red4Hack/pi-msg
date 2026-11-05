@@ -14,8 +14,8 @@ In-process: workers are `AgentSession`s from `createAgentSession()`; no CLI, tmu
 | `agent.ts` | Session wrapper |
 | `team.ts`, `skills.ts`, `ui.ts` | Team layer, skill index, overlay panel |
 
-## State: `.pi/msg/`
-`registry/<name>.json`, `inbox/<name>/*.json`, `reservations.json`, `feed.jsonl`, `runs/<id>.json`, `claims/`, `completions/`, `team/`, `skills/`, `config.json`. Writes are atomic (tmp+rename); shared files use short `wx` locks. Dead agents are swept by pid. Add `.pi/msg/` to `.gitignore`.
+## State: `~/.pi/agent/msg/state/<cwd hash>/` (private: 0700 dirs, 0600 files, owner-checked, no symlink)
+`registry/<name>.json`, `inbox/<name>/*.json`, `reservations.json`, `feed.jsonl`, `runs/<id>.json`, `claims/`, `completions/`, `team/`, `skills/`, `config.json`. Writes are atomic (tmp+rename); shared files use short `wx` locks. Dead agents are swept by pid. Team charter/memory/skills stay in the project `.pi/msg/` (shareable).
 
 ## Constants
 Concurrency 3 (max 10) · max 8 tasks · stuck after 5 min idle with a task/reservation · plan refinement 2 passes · review 3 iterations · inbox poll 1 s.

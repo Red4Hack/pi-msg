@@ -10,12 +10,12 @@ Install: `pi install https://github.com/Red4Hack/pi-msg` (or `pi install git:git
 - The LLM uses the `msg` tool: `task`, `tasks` (DAG with `deps`, `files`), `plan`, `swarm`/`claim`/`complete`, `reserve`/`release`, `send`, `feed`, `list`, `models`, `team*`.
 
 ## Notes
-- State lives in `.pi/msg/` (JSON files). Models default to the current session; the LLM can override per call.
+- State lives in `~/.pi/agent/msg/state/<cwd hash>/` (JSON files, 0700/0600, outside the repo). Models default to the current session; the LLM can override per call.
 - Tasks that write must declare `files` (reserved while running); there is no worktree isolation.
 - Docs: `docs/usage.md`, `docs/tool-reference.md`, `docs/architecture.md`.
 
 ## Config (optional)
-`{"announce": true}` in `.pi/msg/config.json` or `~/.pi/agent/msg.json` posts the full result in chat when a `/msg` run finishes. Default: one-line notification only.
+`{"announce": true}` in `~/.pi/agent/msg.json` posts the full result in chat when a `/msg` run finishes. Default: one-line notification only.
 
 ## Panel keys
 `←→` DM tab, `Enter` detail, `m` chat, `p` revise task, `r` reset, `x` delete, `b` block, `q` stop, `u` unblock, `s` start, `y/n` approve, `f` feed focus, `A` abort all.

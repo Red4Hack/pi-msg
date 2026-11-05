@@ -3,6 +3,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import crypto from "node:crypto";
+import os from "node:os";
 
 export type Status = "active" | "idle" | "away" | "stuck";
 export interface Agent {
@@ -56,10 +57,19 @@ const sleepSync = (ms: number) => Atomics.wait(new Int32Array(new SharedArrayBuf
 const enc = encodeURIComponent;
 let seq = 0; // keeps same-millisecond messages in send order
 
-export function createBus(cwd: string) {
-	const root = path.join(cwd, ".pi", "msg");
+const NAME = /^[A-Za-z0-9._-]{1,64}$/; // agent names become file names: no separators, no traversal
+
+/** State lives outside the project (a cloned repo cannot ship an inbox/registry). Private: 0700 dirs, 0600 files, owned by us, not a symlink. */
+export const defaultRoot = (cwd: string) => path.join(os.homedir(), ".pi", "agent", "msg", "state", crypto.createHash("sha1").update(path.resolve(cwd)).digest("hex").slice(0, 16));
+
+export function createBus(cwd: string, rootDir?: string) {
+	const root = rootDir ?? defaultRoot(cwd);
+	fs.mkdirSync(root, { recursive: true, mode: 0o700 });
+	const st = fs.lstatSync(root);
+	if (st.isSymbolicLink() || (process.getuid && st.uid !== process.getuid())) throw new Error(`msg: ${root} is a symlink or not owned by you`);
+	fs.chmodSync(root, 0o700);
 	const p = (...a: string[]) => path.join(root, ...a);
-	const mk = (d: string) => fs.mkdirSync(d, { recursive: true });
+	const mk = (d: string) => fs.mkdirSync(d, { recursive: true, mode: 0o700 });
 	const readJson = <T>(f: string, def: T): T => {
 		try {
 			return JSON.parse(fs.readFileSync(f, "utf8"));
@@ -70,7 +80,7 @@ export function createBus(cwd: string) {
 	const writeJson = (f: string, v: unknown) => {
 		mk(path.dirname(f));
 		const t = `${f}.${process.pid}.${crypto.randomBytes(3).toString("hex")}.tmp`;
-		fs.writeFileSync(t, JSON.stringify(v, null, 1));
+		fs.writeFileSync(t, JSON.stringify(v, null, 1), { mode: 0o600 });
 		fs.renameSync(t, f);
 	};
 	const lock = <T>(name: string, fn: () => T): T => {
@@ -78,7 +88,7 @@ export function createBus(cwd: string) {
 		mk(root);
 		for (let i = 0; ; i++) {
 			try {
-				fs.closeSync(fs.openSync(f, "wx"));
+				fs.closeSync(fs.openSync(f, "wx", 0o600));
 				break;
 			} catch (e: any) {
 				if (e.code !== "EEXIST") throw e;
@@ -112,7 +122,7 @@ export function createBus(cwd: string) {
 		const out: Agent[] = [];
 		for (const f of files(p("registry"))) {
 			const a = readJson<Agent | null>(p("registry", f), null);
-			if (!a) continue;
+			if (!a || a.name !== f.slice(0, -5) || !NAME.test(a.name) || !Number.isInteger(a.pid)) continue; // malformed/forged entry: ignore
 			if (!alive(a)) leave(a.name);
 			else out.push(a);
 		}
@@ -161,7 +171,7 @@ export function createBus(cwd: string) {
 		for (const f of files(d)) {
 			const m = readJson<any>(path.join(d, f), null);
 			fs.rmSync(path.join(d, f), { force: true });
-			if (m) out.push(m);
+			if (m && typeof m.from === "string" && typeof m.text === "string") out.push(m);
 		}
 		return out;
 	}
@@ -207,7 +217,7 @@ export function createBus(cwd: string) {
 	// ---- feed
 	function feed(ev: { who: string; kind: string; text: string }) {
 		mk(root);
-		fs.appendFileSync(p("feed.jsonl"), `${JSON.stringify({ ts: Date.now(), ...ev })}\n`);
+		fs.appendFileSync(p("feed.jsonl"), `${JSON.stringify({ ts: Date.now(), ...ev })}\n`, { mode: 0o600 });
 	}
 	function recent(n = 20): { ts: number; who: string; kind: string; text: string }[] {
 		try {
@@ -235,7 +245,7 @@ export function createBus(cwd: string) {
 
 	// ---- swarm: atomic claims (wx)
 	function claims(): { taskId: string; owner: string; since: number }[] {
-		return files(p("claims")).map((f) => readJson<any>(p("claims", f), null)).filter(Boolean);
+		return files(p("claims")).map((f) => readJson<any>(p("claims", f), null)).filter((c) => c && typeof c.taskId === "string" && typeof c.owner === "string");
 	}
 	function claim(owner: string, taskId: string): { ok: boolean; reason?: string } {
 		if (completed().has(taskId)) return { ok: false, reason: "already completed" };
@@ -244,7 +254,7 @@ export function createBus(cwd: string) {
 		mk(path.dirname(f));
 		const rec = { taskId, owner, since: Date.now() };
 		try {
-			fs.writeFileSync(f, JSON.stringify(rec), { flag: "wx" });
+			fs.writeFileSync(f, JSON.stringify(rec), { flag: "wx", mode: 0o600 });
 			return { ok: true };
 		} catch (e: any) {
 			if (e.code !== "EEXIST") throw e;

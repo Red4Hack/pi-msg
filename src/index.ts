@@ -6,7 +6,9 @@ import { StringEnum } from "@earendil-works/pi-ai";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 import { availableModels, runAgent, setRegistry } from "./agent.ts";
-import { type Bus, type Run, createBus } from "./bus.ts";
+import { type Bus, type Run, createBus, defaultRoot } from "./bus.ts";
+import { advise } from "./advise.ts";
+import { decide, decisionCfg } from "./decision.ts";
 import { MAX_TASKS, parsePlan, plannerPrompt, toTasks, validate } from "./plan.ts";
 import { label, makeGuard, sweepStuck } from "./presence.ts";
 import { type ActiveRun, report, resumable, runDag } from "./run.ts";
@@ -15,7 +17,7 @@ import * as team from "./team.ts";
 import { openPanel } from "./ui.ts";
 import { type Env, execTask } from "./worker.ts";
 
-const ACTIONS = ["join", "list", "whois", "feed", "send", "broadcast", "reserve", "release", "status", "task", "tasks", "plan", "resume", "swarm", "claim", "unclaim", "complete", "models", "team", "team.save", "team.charter", "team.note", "team.memory", "team.roles", "team.status", "approve", "reject"] as const;
+const ACTIONS = ["join", "list", "whois", "feed", "send", "broadcast", "reserve", "release", "status", "task", "tasks", "plan", "resume", "swarm", "claim", "unclaim", "complete", "models", "team", "team.save", "team.charter", "team.note", "team.memory", "team.roles", "team.status", "approve", "reject", "decide", "advise"] as const;
 
 const TaskItem = Type.Object({
 	id: Type.String(),
@@ -49,6 +51,8 @@ const Params = Type.Object({
 	taskId: Type.Optional(Type.String()),
 	limit: Type.Optional(Type.Number()),
 	profile: Type.Optional(Type.String({ description: "migration-squad | review-squad | research-squad" })),
+	question: Type.Optional(Type.String({ description: "action=decide: question for the decision model (which file / which tool / retry or stop)" })),
+	options: Type.Optional(Type.Array(Type.String(), { description: "action=decide: 2-20 options" })),
 	type: Type.Optional(Type.String({ description: "decision | interface | risk | handoff" })),
 });
 
@@ -63,14 +67,31 @@ export default function (pi: ExtensionAPI) {
 	let timer: ReturnType<typeof setInterval> | undefined;
 	let tick = 0;
 	let unread = 0;
+	let forks = 0, advising = 0;
 	let guard: ReturnType<typeof makeGuard> | undefined;
 	const active = new Map<string, ActiveRun>();
 	const plural = (n: number) => (n === 1 ? "agent" : "agents");
-	const B = () => bus ?? (bus = createBus(cwd));
+	// Lazy: .pi/msg only appears on first use (or when it already exists), not in every project pi opens.
+	const B = (): Bus => {
+		if (bus) return bus;
+		const b = (bus = createBus(cwd));
+		me = b.join({ human: true, model, branch: undefined }).name;
+		guard = makeGuard(b, me);
+		timer = setInterval(() => {
+			for (const m of b.drain(me)) {
+				unread++;
+				b.update(me, { lastActivity: Date.now() });
+				pi.sendMessage({ customType: "msg", content: `[msg from ${m.from}] ${m.text}`, display: true }, { triggerTurn: true, deliverAs: "steer" });
+			}
+			if (++tick % 30 === 0) for (const n of sweepStuck(b)) if (n !== me) ui?.notify(`${n} seems stuck`, "warning");
+			refresh();
+		}, 1000);
+		return b;
+	};
 
-	// Result in chat is off by default (the TUI shows it); enable with {"announce": true} in .pi/msg/config.json or ~/.pi/agent/msg.json
+	// Result in chat is off by default (the TUI shows it); enable with {"announce": true} in ~/.pi/agent/msg.json
 	const announceOn = () =>
-		[path.join(cwd, ".pi", "msg", "config.json"), path.join(os.homedir(), ".pi", "agent", "msg.json")].some((f) => {
+		[path.join(os.homedir(), ".pi", "agent", "msg.json")].some((f) => {
 			try {
 				return JSON.parse(fs.readFileSync(f, "utf8")).announce === true;
 			} catch {
@@ -84,7 +105,7 @@ export default function (pi: ExtensionAPI) {
 		if (!bus || !ui) return;
 		const ws = bus.agents().filter((x) => !x.human && x.task);
 		// Claude Code-style subagent list above the editor; hidden when idle
-		ui.setStatus("msg", unread ? `✉ ${unread} unread (/msg)` : undefined);
+		ui.setStatus("msg", [unread ? `✉ ${unread} unread (/msg)` : "", advising ? "advisor [advising]" : "", forks ? `decision [${forks} forks]` : ""].filter(Boolean).join(" · ") || undefined);
 		ui.setWidget("msg", ws.length ? [`⏺ ${ws.length} ${plural(ws.length)} running`, ...ws.slice(0, 5).map((a, i, l) => `  ${i === l.length - 1 ? "└─" : "├─"} ${a.task} · ${a.name} · ${a.note || "working"} · ${a.tools} tools · ${a.tokens > 1000 ? `${Math.round(a.tokens / 1000)}k` : a.tokens} tok`)] : undefined);
 	};
 
@@ -93,23 +114,25 @@ export default function (pi: ExtensionAPI) {
 		setRegistry(ctx.modelRegistry);
 		ui = ctx.hasUI ? ctx.ui : undefined;
 		model = ctx.model ? `${ctx.model.provider}/${ctx.model.id}` : undefined;
-		const b = B();
-		me = b.join({ human: true, model, branch: undefined }).name;
-		guard = makeGuard(b, me);
-		timer = setInterval(() => {
-			for (const m of b.drain(me)) {
-				unread++;
-				b.update(me, { lastActivity: Date.now() });
-				pi.sendMessage({ customType: "msg", content: `[msg from ${m.from}] ${m.text}`, display: true }, { triggerTurn: true, deliverAs: "steer" });
-			}
-			if (++tick % 30 === 0) for (const n of sweepStuck(b)) if (n !== me) ui?.notify(`${n} seems stuck`, "warning");
-			refresh();
-		}, 1000);
+		if (fs.existsSync(defaultRoot(cwd))) B();
 		refresh();
 	});
 	pi.on("model_select", (e: any) => void (model = `${e.model.provider}/${e.model.id}`));
 	pi.on("tool_call", (e: any) => guard?.call(e));
-	pi.on("tool_result", (e: any) => guard?.result(e));
+	// advisor trigger: the same tool error twice in a row
+	let lastErr = "", errRuns = 0;
+	pi.on("tool_result", (e: any, ctx: any) => {
+		guard?.result(e);
+		const k = e.isError ? `${e.toolName}:${JSON.stringify(e.content).slice(0, 200)}` : "";
+		errRuns = k && k === lastErr ? errRuns + 1 : k ? 1 : 0;
+		lastErr = k;
+		if (errRuns !== 2) return;
+		advising++; refresh();
+		void advise({ cwd, entries: ctx.sessionManager.getBranch(), model, why: "same error twice" }).finally(() => { advising--; refresh(); }).then((a) => {
+			B().feed({ who: me, kind: "advice", text: a.slice(0, 300) });
+			pi.sendMessage({ customType: "msg", content: `[advisor] ${a}`, display: true }, { triggerTurn: false, deliverAs: "steer" });
+		}, () => {});
+	});
 	pi.on("session_shutdown", () => {
 		if (timer) clearInterval(timer);
 		for (const a of active.values()) a.ac.abort();
@@ -215,6 +238,21 @@ export default function (pi: ExtensionAPI) {
 			case "send": case "broadcast": return `Sent to ${b.send(me, p.action === "broadcast" ? "all" : p.to ?? "", p.message ?? "")} agent(s).`;
 			case "reserve": { const r = b.reserve(me, p.paths ?? [], p.reason); return r.ok ? "Reserved." : `Blocked by: ${r.conflicts.map((c) => `${c.owner} (${c.path})`).join(", ")}`; }
 			case "release": b.release(me, p.paths); return "Released.";
+			case "decide": {
+				const cfg = decisionCfg(cwd);
+				if (!cfg) return "decision layer off: set $LLAMA_SERVER_URL or {\"decision\": {\"baseUrl\"}} in ~/.pi/agent/msg.json";
+				if (!p.question || !p.options) throw new Error("decide: needs `question` and `options`");
+				const d = await decide(cfg, p.question, p.options, signal, p.message);
+				forks++; refresh();
+				b.feed({ who: me, kind: "decision", text: `${p.question} → ${d.choice} p=${d.p.toFixed(2)} ${d.route === "code" ? "sharp" : "split"} → ${d.route}` });
+				return JSON.stringify(d);
+			}
+			case "advise": {
+				advising++; refresh();
+				const a = await advise({ cwd, entries: ctx?.sessionManager?.getBranch() ?? [], model, why: p.message, signal }).finally(() => { advising--; refresh(); });
+				b.feed({ who: me, kind: "advice", text: a.slice(0, 300) });
+				return a;
+			}
 			case "models": return (await availableModels()).join("\n");
 			case "status": { const r = [...active.values()].pop()?.run ?? b.latestRun(); return r ? report(r) : "No run."; }
 			case "task": {
@@ -312,10 +350,12 @@ export default function (pi: ExtensionAPI) {
 	} as any);
 
 	pi.registerCommand("msg", {
-		description: "/msg → panel · /msg <task> · /msg plan <goal> · /msg resume · /msg -m provider/id <task>",
+		description: "/msg → panel · /msg <task> · /msg plan <goal> · /msg resume · /msg settings · /msg -m provider/id <task>",
 		handler: async (args: string, ctx: any) => {
 			const a = args.trim();
-			if (!a) return void (await (unread = 0, refresh(), openPanel(ctx, { bus: B(), me, cwd, active, save: (r) => B().saveRun(r), resume: () => void act({ action: "resume" }, undefined, ctx).then((t) => announce(t, ctx), (e) => ctx.ui.notify(`msg: ${e.message}`, "error")), profiles: team.profileNames(), lobby: setLobby })));
+			const open = (mode?: "settings") => (unread = 0, refresh(), openPanel(ctx, { bus: B(), me, cwd, active, save: (r) => B().saveRun(r), resume: () => void act({ action: "resume" }, undefined, ctx).then((t) => announce(t, ctx), (e) => ctx.ui.notify(`msg: ${e.message}`, "error")), profiles: team.profileNames(), lobby: setLobby }, mode));
+			if (!a) return void (await open());
+			if (a === "settings") return void (await open("settings"));
 			const mm = a.match(/^-m\s+(\S+)\s+([\s\S]+)$/);
 			const [m, rest] = mm ? [mm[1], mm[2]] : [undefined, a];
 			let p: any = { action: "task", task: rest, model: m };

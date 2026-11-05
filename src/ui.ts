@@ -5,6 +5,7 @@ import type { Bus, Run, Task } from "./bus.ts";
 import { label } from "./presence.ts";
 import { splitTask } from "./plan.ts";
 import type { ActiveRun } from "./run.ts";
+import { FIELDS, getValue, loadSettings, setValue } from "./settings-store.ts";
 
 const ICON: Record<string, string> = { done: "✓", failed: "✗", blocked: "✗", aborted: "■", pending: "○", running: "●", waiting: "◌" };
 const DOT: Record<string, string> = { active: "🟢", idle: "🟡", away: "⚪", stuck: "🔴" };
@@ -22,14 +23,14 @@ export interface PanelDeps {
 	lobby: (delta: number) => number;
 }
 
-export function openPanel(ctx: any, d: PanelDeps) {
+export function openPanel(ctx: any, d: PanelDeps, start: Mode = "list") {
 	return ctx.ui.custom<void>(
 		(tui: any, theme: any, _kb: any, done: (v?: void) => void) => {
 			const timer = setInterval(() => tui.requestRender(), 1000);
 			const p = new Panel(d, theme, () => {
 				clearInterval(timer);
 				done();
-			});
+			}, start);
 			return {
 				get width() { return Math.min(100, Math.max(40, process.stdout.columns ?? 90)); },
 				focused: false,
@@ -49,7 +50,7 @@ const ago = (ms: number) => {
 };
 const clock = (ms: number) => `${Math.floor(ms / 60000)}:${String(Math.floor((ms % 60000) / 1000)).padStart(2, "0")}`;
 
-type Mode = "list" | "detail";
+type Mode = "list" | "detail" | "settings";
 type Input = null | "message" | "block" | "revise" | "split";
 interface Confirm { type: "reset" | "delete" | "abort-all"; id: string; title: string }
 
@@ -63,10 +64,13 @@ class Panel {
 	scroll = 0;
 	tab = 0; // 0 = All, n = DM with n-th peer
 	note: { msg: string; until: number } | null = null;
+	setSel = 0;
+	setBuf: string | null = null; // editing a settings field
 	private d: PanelDeps;
 	private theme: any;
 	private close: () => void;
-	constructor(d: PanelDeps, theme: any, close: () => void) {
+	constructor(d: PanelDeps, theme: any, close: () => void, mode: Mode = "list") {
+		this.mode = mode;
 		this.d = d;
 		this.theme = theme;
 		this.close = close;
@@ -85,7 +89,55 @@ class Panel {
 		this.note = { msg, until: Date.now() + 4000 };
 	}
 
+	private settingsInput(s: string) {
+		const f = FIELDS[this.setSel];
+		const save = (raw: string) => {
+			try { setValue(f, raw); this.flash("saved"); } catch (e: any) { this.flash(e.message); }
+		};
+		if (this.setBuf !== null) {
+			if (matchesKey(s, "escape")) this.setBuf = null;
+			else if (matchesKey(s, "return")) { save(this.setBuf.trim()); this.setBuf = null; }
+			else if (matchesKey(s, "backspace")) this.setBuf = this.setBuf.slice(0, -1);
+			else if (s.length >= 1 && s.charCodeAt(0) >= 32) this.setBuf += s; // also accepts pasted text
+			return;
+		}
+		if (matchesKey(s, "escape") || s === "q" || s === "c") { this.mode = "list"; return; }
+		if (matchesKey(s, "up") || s === "k") this.setSel = (this.setSel + FIELDS.length - 1) % FIELDS.length;
+		else if (matchesKey(s, "down") || s === "j") this.setSel = (this.setSel + 1) % FIELDS.length;
+		else if ((matchesKey(s, "left") || matchesKey(s, "right")) && f.options) {
+			const cur = getValue(loadSettings(), f);
+			const d = matchesKey(s, "right") ? 1 : f.options.length - 1;
+			save(f.options[(f.options.indexOf(cur) + d) % f.options.length]);
+		}
+		else if (s === "d") save("");
+		else if (matchesKey(s, "return")) {
+			const cur = getValue(loadSettings(), f);
+			if (f.options) save(f.options[(f.options.indexOf(cur) + 1) % f.options.length]);
+			else this.setBuf = f.secret ? "" : cur;
+		}
+	}
+
+	private settingsView(): string[] {
+		const th = this.theme;
+		const cfg = loadSettings();
+		const rows = FIELDS.map((f, i) => {
+			const on = i === this.setSel;
+			const v = getValue(cfg, f);
+			let shown: string;
+			if (on && this.setBuf !== null) shown = `${this.setBuf}█`;
+			else if (f.options) {
+				// all choices inline; the active one (explicit or auto) is marked
+				const cur = v || f.auto?.() || "";
+				shown = f.options.filter(Boolean).map((o) => (o === cur ? th.fg("accent", `[${o}]`) : th.fg("dim", o))).join(" ") + (v ? "" : th.fg("dim", " (auto)"));
+			} else shown = f.secret && v ? "••••••••" : v || th.fg("dim", `(auto) ${f.auto?.() ?? "unset"}`);
+			const line = `${on ? "▸ " : "  "}${f.label.padEnd(20)} ${shown}`;
+			return on ? th.bold(th.fg("accent", line)) : line;
+		});
+		return [th.fg("accent", "Settings") + th.fg("dim", " · ~/.pi/agent/msg.json"), "", ...rows, "", th.fg("dim", FIELDS[this.setSel].help ?? "")];
+	}
+
 	input(s: string) {
+		if (this.mode === "settings") return this.settingsInput(s);
 		const ar = this.run();
 		const tasks = ar?.run.tasks ?? [];
 		const t: Task | undefined = tasks[this.sel];
@@ -130,6 +182,7 @@ class Panel {
 			return this.close();
 		}
 		if (s === "m" || s === "@" || matchesKey(s, "tab")) { this.input_ = "message"; this.buf = s === "@" ? "@" : ""; return; }
+		if (s === "c" && this.mode === "list") { this.mode = "settings"; return; }
 		if (s === "l" || s === "L") return this.flash(`lobby workers: ${this.d.lobby(s === "l" ? 1 : -1)}`);
 		if (s === "f") { this.feedFocus = !this.feedFocus; return; }
 		if (s === "A" && ar) { this.confirm = { type: "abort-all", id: "", title: "" }; return; }
@@ -253,6 +306,7 @@ class Panel {
 			const at = this.buf.startsWith("@");
 			return th.fg("accent", `${at ? "DM" : "broadcast"}: ${this.buf}█  [Enter] Send${at && !this.buf.includes(" ") ? "  [Tab] Complete" : ""}  [Esc] Cancel`);
 		}
+		if (this.mode === "settings") return N ? N + HINTS : th.fg("dim", this.setBuf !== null ? "Enter:Save Esc:Cancel (empty = unset)" : "↑↓:Select Enter:Edit ←→:Cycle d:Auto Esc:Back" + HINTS);
 		if (N) return N + HINTS;
 		const h: string[] = [];
 		if (t) {
@@ -265,7 +319,7 @@ class Panel {
 			if (t.approval === "pending") h.push("y/n:Approve");
 			if (this.mode === "detail") h.push("←→:Nav");
 		}
-		h.push("l/L:Lobby", "m:Chat", "f:Feed", "A:AbortAll", ...HINTS.trim().split(" "));
+		h.push("c:Config", "l/L:Lobby", "m:Chat", "f:Feed", "A:AbortAll", ...HINTS.trim().split(" "));
 		// single line (keeps the content area tall); Esc:Close first so right-edge truncation never hides it
 		return th.fg("dim", h.join(" "));
 	}
@@ -284,7 +338,7 @@ class Panel {
 		const ar = this.run();
 		const tasks = ar?.run.tasks ?? [];
 		this.sel = Math.max(0, Math.min(this.sel, tasks.length - 1));
-		if (!tasks.length) this.mode = "list";
+		if (!tasks.length && this.mode === "detail") this.mode = "list";
 		const sel: Task | undefined = tasks[this.sel];
 		const agents = this.d.bus.agents();
 		const now = Date.now();
@@ -306,7 +360,9 @@ class Panel {
 		const rows = process.stdout.rows ?? 24;
 		const H = Math.max(8, rows - 6);
 		let content: string[] = [];
-		if (this.mode === "detail" && sel && ar) {
+		if (this.mode === "settings") {
+			content = this.settingsView();
+		} else if (this.mode === "detail" && sel && ar) {
 			const all = this.detail(sel, ar, sectionW);
 			const max = Math.max(0, all.length - H);
 			this.scroll = Math.min(this.scroll, max);

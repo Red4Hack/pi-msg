@@ -25,3 +25,19 @@ Rules: a task that writes must declare `files` (reserved while it runs) or be `r
 
 ## Worker tool
 Workers get `msg_send{to,message}` (`to` = agent name or `all`). Replies arrive as `[msg from X]` steering messages. A worker's `all` does not wake the human; the human's `all` reaches everyone.
+
+## decide / advise
+
+Config in `~/.pi/agent/msg.json`:
+
+```json
+{ "decision": { "baseUrl": "http://192.168.0.19:9931", "model": "ggml-org/Julia-1-GGUF:BF16", "threshold": 0.8, "api": "systemone" },
+  "advisor":  { "model": "provider/id" } }
+```
+
+- Jev (`https://api.typesafe.ai`, model `jev-latest`, `apiKey` in config; auth header not verified), Laya (`model: "english"`) and llama.cpp all speak System One: use `api: "systemone"`. `p` is the chosen option's probability (not Laya's entropy-based `confidence`); `usage.truncated` forces `lead`.
+- `decision.api`: `systemone` (default, llama-server decision model) or `openai-logprobs` (any OpenAI-compatible chat model, p from first-token logprobs).
+- `decide {question, options}` → `{choice, p, route}`. Backend: llama-server decision model via `/v1/systemone` (`message` = optional state/context; `baseUrl` defaults to `$LLAMA_SERVER_URL`, model to Julia-1). `p >= threshold` = sharp → `code`; otherwise split → `lead`. No `decision` config = layer off. Logged in the feed (`kind=decision`).
+- `advise {message?}`: read-only agent reads the session transcript and returns advice (advisor model, default = session model). Also fires automatically when the same tool error occurs twice in a row (steer message, no new turn).
+- Status line shows `advisor [advising]` and `decision [N forks]`.
+- `/msg settings` opens a TUI to edit `decision`, `advisor` and `announce` (saved to `~/.pi/agent/msg.json`, 0600; secret key masked).

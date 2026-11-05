@@ -7,7 +7,7 @@ import { makeGuard, sweepStuck, STUCK_MS } from "../src/presence.ts";
 
 let cwd: string;
 let bus: Bus;
-beforeEach(() => { cwd = fs.mkdtempSync(path.join(os.tmpdir(), "msg-bus-")); bus = createBus(cwd); });
+beforeEach(() => { cwd = fs.mkdtempSync(path.join(os.tmpdir(), "msg-bus-")); bus = createBus(cwd, path.join(cwd, ".pi/msg")); });
 afterEach(() => fs.rmSync(cwd, { recursive: true, force: true }));
 
 test("registry: unique names, dead pids are dropped", () => {
@@ -119,4 +119,12 @@ test("findRun picks the run that owns the task, not the newest", () => {
 	bus.saveRun({ id: "20260102000000", created: 2, tasks: [] });
 	expect(bus.findRun("s1")?.id).toBe("20260101000000");
 	expect(bus.findRun("nope")).toBeNull();
+});
+
+test("private state; forged registry entry ignored", () => {
+	expect(fs.statSync(bus.root).mode & 0o777).toBe(0o700);
+	bus.join({ name: "Real" });
+	expect(fs.statSync(path.join(bus.root, "registry/Real.json")).mode & 0o777).toBe(0o600);
+	fs.writeFileSync(path.join(bus.root, "registry/Evil.json"), JSON.stringify({ name: "../../x", pid: process.pid }));
+	expect(bus.agents().map((a) => a.name)).toEqual(["Real"]);
 });
