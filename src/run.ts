@@ -69,9 +69,9 @@ export function resumable(run: Run): Run {
 	return run;
 }
 
-export function report(run: Run): string {
+export function report(run: Run, cap = 400): string {
 	const icon: Record<string, string> = { done: "✓", failed: "✗", blocked: "⛔", aborted: "■", pending: "⏸", running: "▶", waiting: "⏳" };
-	const lines = run.tasks.map((t) => `${icon[t.status] ?? "?"} ${t.id} ${t.title} [${t.status}${t.approval === "pending" ? ", awaiting approval" : t.approval === "rejected" ? ", rejected" : ""}]${t.result && t.status === "done" ? `\n    ${t.result.slice(0, 400).replace(/\n/g, "\n    ")}` : ""}${t.error ? `\n    error: ${t.error}` : ""}`);
+	const lines = run.tasks.map((t) => `${icon[t.status] ?? "?"} ${t.id} ${t.title} [${t.status}${t.approval === "pending" ? ", awaiting approval" : t.approval === "rejected" ? ", rejected" : ""}]${t.result && t.status === "done" ? `\n    ${t.result.slice(0, cap).replace(/\n/g, "\n    ")}` : ""}${t.error ? `\n    error: ${t.error}` : ""}`);
 	const needs = run.tasks.filter((t) => t.approval === "pending").map((t) => t.id);
 	const done = run.tasks.filter((t) => t.status === "done").length;
 	return `Run ${run.id}: ${done}/${run.tasks.length} completed\n${lines.join("\n")}${needs.length ? `\nneedsApproval: ${needs.join(", ")} (task approve/reject)` : ""}`;

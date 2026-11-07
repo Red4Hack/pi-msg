@@ -154,7 +154,7 @@ export default function (pi: ExtensionAPI) {
 			B().saveRun(run);
 			refresh();
 		}
-		return report(run);
+		return report(run, 12_000); // shortcut: 12k per task keeps lead context bounded, status keeps 400; upgrade if real results exceed it
 	}
 
 	// Lobby: standing workers that pull ready tasks (claim) from the current run. shortcut: polls every 2s.
