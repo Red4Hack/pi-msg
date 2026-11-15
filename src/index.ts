@@ -16,8 +16,7 @@ import { skillIndex } from "./skills.ts";
 import * as team from "./team.ts";
 import { openPanel } from "./ui.ts";
 import { type Env, execTask } from "./worker.ts";
-
-const ACTIONS = ["join", "list", "whois", "feed", "send", "broadcast", "reserve", "release", "status", "task", "tasks", "plan", "resume", "swarm", "claim", "unclaim", "complete", "models", "team", "team.save", "team.charter", "team.note", "team.memory", "team.roles", "team.status", "approve", "reject", "decide", "advise"] as const;
+import { ACTIONS, fixAction } from "./actions.ts";
 
 const TaskItem = Type.Object({
 	id: Type.String(),
@@ -36,7 +35,7 @@ const Params = Type.Object({
 	task: Type.Optional(Type.String({ description: "action=task: direct prompt for 1 worker (research, grep, docs...)" })),
 	tasks: Type.Optional(Type.Array(TaskItem, { description: "action=tasks|swarm: task graph (deps form parallel waves)" })),
 	goal: Type.Optional(Type.String({ description: "action=plan: large/vague goal; a planner generates the graph" })),
-	model: Type.Optional(Type.String({ description: "provider/id[:level]. Omitted = session model. Use action=models to list" })),
+	model: Type.Optional(Type.String({ description: "provider/id[:level]. Omit it: the session model is used" })),
 	planner: Type.Optional(Type.String()),
 	reviewer: Type.Optional(Type.String()),
 	concurrency: Type.Optional(Type.Number({ description: "Parallel workers (default 3, max 10)" })),
@@ -335,8 +334,9 @@ export default function (pi: ExtensionAPI) {
 		name: "msg",
 		label: "msg",
 		description:
-			"Multi-agent, in-process. Delegate: {action:'task',task} = 1 worker (research/grep/docs); {action:'tasks',tasks:[{id,prompt,deps,files}]} = parallel graph (waves); {action:'plan',goal} = planner generates the graph. Coordination: list, feed, send, broadcast, reserve, release. Swarm: swarm, claim, unclaim, complete. Team: team, team.*, approve, reject. Models: action=models lists them; `model` optional (provider/id[:level]), omitted = current session. Tasks that write require `files`.",
+			"Multi-agent: run workers, list models, messaging. In-process. Delegate: {action:'task',task} = 1 worker (research/grep/docs); {action:'tasks',tasks:[{id,prompt,deps,files}]} = parallel graph (waves); {action:'plan',goal} = planner generates the graph. Coordination: list, feed, send, broadcast, reserve, release. Swarm: swarm, claim, unclaim, complete. Team: team, team.*, approve, reject. Models: omit `model`, the session model is used; action=models lists the others. Tasks that write require `files`.",
 		parameters: Params,
+		prepareArguments: (a: any) => (a && typeof a === "object" ? { ...a, action: fixAction(a.action) } : a),
 		async execute(_id: string, params: any, signal: AbortSignal, _upd: unknown, ctx: any) {
 			// Delegation actions return at once (like pi-messenger); the result arrives later as a message.
 			if (["task", "tasks", "plan", "resume"].includes(params.action) && !params.wait && ctx?.hasUI) { // no UI (pi -p) would exit before the background run ends

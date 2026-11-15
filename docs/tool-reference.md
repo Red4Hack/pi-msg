@@ -12,6 +12,8 @@ One tool, `action` selects the operation.
 | `status` | | Report of current/latest run |
 | `models` | | Available `provider/id` list |
 
+Guessed action names are mapped to the real one: a `list`/`get`/`show` prefix is dropped and `_`/`-` become `.` (`list_models` -> `models`, `team_status` -> `team.status`).
+
 Rules: a task that writes must declare `files` (reserved while it runs) or be `readOnly:true`. `verify:true` adds a reviewer (SHIP / NEEDS_WORK / MAJOR_RETHINK, max 3 iterations). `concurrency` defaults to 3, max 10.
 
 ## Coordination
